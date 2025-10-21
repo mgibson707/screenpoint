@@ -4,18 +4,48 @@ import logging
 
 MIN_MATCH_COUNT = 6
 FLANN_INDEX_KDTREE = 0
+FLANN_INDEX_LSH = 6
 
-sift = cv2.xfeatures2d.SIFT_create()
 
+def project(view, screen, debug=False, algorithm='orb'):
+    """
+    Project the centroid of a view image onto screen coordinates.
 
-def project(view, screen, debug=False):
-    kp_screen, des_screen = sift.detectAndCompute(screen, None)
-    kp_view, des_view = sift.detectAndCompute(view, None)
+    Args:
+        view: Grayscale view image (camera photo of screen)
+        screen: Grayscale screen image (reference image)
+        debug: If True, returns debug visualization image
+        algorithm: Feature detection algorithm ('orb' or 'sift')
+                  'orb' is 10-100x faster, 'sift' is more robust
 
-    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-    search_params = dict(checks=50)
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
-    matches = flann.knnMatch(des_screen, des_view, k=2)
+    Returns:
+        (x, y) coordinates, or (x, y, debug_img) if debug=True
+        Returns (-1, -1) if matching fails
+    """
+    # Choose feature detector
+    if algorithm.lower() == 'sift':
+        detector = cv2.xfeatures2d.SIFT_create()
+    else:  # default to ORB
+        detector = cv2.ORB_create(nfeatures=2000)
+
+    # Detect and compute features
+    kp_screen, des_screen = detector.detectAndCompute(screen, None)
+    kp_view, des_view = detector.detectAndCompute(view, None)
+
+    # Choose matcher based on descriptor type
+    if algorithm.lower() == 'sift':
+        # SIFT uses floating-point descriptors, use FLANN with KDTree
+        index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params = dict(checks=50)
+        matcher = cv2.FlannBasedMatcher(index_params, search_params)
+    else:
+        # ORB uses binary descriptors, use FLANN with LSH (Locality Sensitive Hashing)
+        index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6,
+                           key_size=12, multi_probe_level=1)
+        search_params = dict(checks=50)
+        matcher = cv2.FlannBasedMatcher(index_params, search_params)
+
+    matches = matcher.knnMatch(des_screen, des_view, k=2)
 
     # Store all good matches as per Lowe's ration test
     good = []
